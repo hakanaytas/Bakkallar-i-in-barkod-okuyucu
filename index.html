@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0E7C5A" />
+<title>Kasa &amp; Stok</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          kasa:   { DEFAULT: '#0E7C5A', dark: '#0A5E45', light: '#E3F2EC' },
+          ink:    { DEFAULT: '#16211F', soft: '#4B5B57' },
+          paper:  '#EEF1F4',
+          amber2: '#E8A020',
+          danger: '#C2392C'
+        }
+      }
+    }
+  }
+</script>
+<style>
+  html, body { background: #EEF1F4; color: #16211F; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  .num { font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* Kamera alanı */
+  #reader { width: 100%; border-radius: 14px; overflow: hidden; background: #0B1F17; }
+  #reader video { width: 100% !important; height: auto !important; display: block; object-fit: cover; }
+  #reader img[alt="Info icon"] { display: none; }
+  #reader__dashboard_section_csr button {
+    background: #0E7C5A; color: #fff; border: 0; padding: 8px 14px;
+    border-radius: 10px; font-size: 14px; margin: 6px 4px;
+  }
+  #reader__dashboard_section_csr span, #reader__status_span { color: #cbd5d0 !important; font-size: 12px; }
+  #reader__scan_region { min-height: 200px; }
+
+  /* Sepete eklenince kısa vurgu */
+  @keyframes hit { 0% { background:#FFF6E2; } 100% { background:#ffffff; } }
+  .hit { animation: hit .7s ease-out; }
+
+  @keyframes pop { 0% { transform: scale(.8); opacity: 0 } 55% { transform: scale(1.04); opacity: 1 } 100% { transform: scale(1); opacity: 1 } }
+  .pop { animation: pop .28s cubic-bezier(.2,.9,.3,1.2) both; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  input, select, button { font-size: 16px; } /* iOS zoom engelleme */
+  .safe-b { padding-bottom: calc(env(safe-area-inset-bottom, 0px)); }
+  ::-webkit-scrollbar { width: 6px; height: 6px }
+  ::-webkit-scrollbar-thumb { background: #c8d2ce; border-radius: 99px }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ÜST ÇUBUK -->
+<header class="sticky top-0 z-30 bg-kasa text-white shadow-sm">
+  <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+    <div class="w-9 h-9 rounded-lg bg-white/15 grid place-items-center text-lg">🧾</div>
+    <div class="leading-tight">
+      <div class="font-semibold">Kasa &amp; Stok</div>
+      <div class="text-[11px] text-white/70 num" id="gunlukOzet">Bugün: 0 satış · ₺0,00</div>
+    </div>
+    <div class="ml-auto text-[11px] text-white/70 num" id="urunSayaci">0 ürün</div>
+  </div>
+  <nav class="max-w-3xl mx-auto px-2 flex gap-1">
+    <button data-tab="kasa"    class="tabbtn flex-1 py-2.5 text-sm font-medium rounded-t-lg">Kasa</button>
+    <button data-tab="urunler" class="tabbtn flex-1 py-2.5 text-sm font-medium rounded-t-lg">Ürünler</button>
+    <button data-tab="satislar" class="tabbtn flex-1 py-2.5 text-sm font-medium rounded-t-lg">Satışlar</button>
+  </nav>
+</header>
+
+<main class="max-w-3xl mx-auto px-3 pt-3 pb-56">
+
+  <!-- ======================= KASA ======================= -->
+  <section id="tab-kasa">
+
+    <!-- Tarayıcı -->
+    <div class="bg-white rounded-2xl p-3 shadow-sm border border-black/5">
+      <div class="flex items-center gap-2">
+        <button id="btnKamera" class="flex-1 bg-ink text-white rounded-xl py-3 font-semibold active:scale-[.99] transition">
+          Kamerayı aç
+        </button>
+        <button id="btnKamerayiDegistir" class="hidden px-3 py-3 rounded-xl bg-paper text-ink-soft border border-black/5" title="Kamera değiştir">🔄</button>
+      </div>
+
+      <div id="kameraKutu" class="hidden mt-3">
+        <div id="reader"></div>
+        <p class="text-[11px] text-ink-soft mt-2 text-center">Barkodu çerçeveye yatay olarak sığdırın. Aynı ürünü tekrar okutmak adedi artırır.</p>
+      </div>
+
+      <div class="mt-3 flex gap-2">
+        <input id="elleBarkod" inputmode="numeric" placeholder="Barkodu elle yaz"
+               class="mono flex-1 min-w-0 rounded-xl border border-black/10 px-3 py-2.5 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        <button id="btnElleEkle" class="px-4 rounded-xl bg-kasa-light text-kasa-dark font-semibold border border-kasa/20">Ekle</button>
+      </div>
+      <p id="kameraNot" class="hidden text-[11px] text-danger mt-2"></p>
+    </div>
+
+    <!-- Sepet -->
+    <div class="mt-3 flex items-baseline justify-between px-1">
+      <h2 class="font-semibold">Sepet</h2>
+      <button id="btnSepetBosalt" class="text-xs text-danger font-medium">Sepeti boşalt</button>
+    </div>
+
+    <div id="sepetListe" class="mt-2 space-y-2"></div>
+
+    <div id="sepetBos" class="mt-2 bg-white rounded-2xl border border-dashed border-black/10 p-8 text-center">
+      <div class="text-3xl">📷</div>
+      <p class="mt-2 text-sm text-ink-soft">Sepet boş. Kamerayı açıp ilk ürünü okutun.</p>
+    </div>
+  </section>
+
+  <!-- ======================= ÜRÜNLER ======================= -->
+  <section id="tab-urunler" class="hidden">
+    <div class="bg-white rounded-2xl p-4 shadow-sm border border-black/5">
+      <h2 id="formBaslik" class="font-semibold mb-3">Yeni ürün ekle</h2>
+      <div class="space-y-2">
+        <input id="fBarkod" inputmode="numeric" placeholder="Barkod"
+               class="mono w-full rounded-xl border border-black/10 px-3 py-2.5 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        <input id="fAd" placeholder="Ürün adı"
+               class="w-full rounded-xl border border-black/10 px-3 py-2.5 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        <div class="flex gap-2">
+          <input id="fFiyat" type="number" step="0.01" min="0" placeholder="Fiyat ₺"
+                 class="num w-1/2 rounded-xl border border-black/10 px-3 py-2.5 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+          <input id="fStok" type="number" step="1" placeholder="Stok adedi"
+                 class="num w-1/2 rounded-xl border border-black/10 px-3 py-2.5 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        </div>
+      </div>
+      <div class="flex gap-2 mt-3">
+        <button id="btnUrunKaydet" class="flex-1 bg-kasa text-white rounded-xl py-3 font-semibold">Kaydet</button>
+        <button id="btnFormTemizle" class="px-4 rounded-xl bg-paper border border-black/10 text-ink-soft">Temizle</button>
+      </div>
+    </div>
+
+    <input id="aramaKutusu" placeholder="Ürün adı veya barkod ara"
+           class="mt-3 w-full rounded-xl border border-black/10 px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+
+    <div id="urunListe" class="mt-3 space-y-2"></div>
+  </section>
+
+  <!-- ======================= SATIŞLAR ======================= -->
+  <section id="tab-satislar" class="hidden">
+    <div class="bg-ink text-white rounded-2xl p-4">
+      <div class="text-xs text-white/60">Bugünün cirosu</div>
+      <div id="bugunCiro" class="num text-4xl font-bold mt-1">₺0,00</div>
+      <div id="bugunDagilim" class="num text-xs text-white/60 mt-2">Nakit ₺0,00 · Kart ₺0,00</div>
+    </div>
+    <div class="flex items-baseline justify-between px-1 mt-4">
+      <h2 class="font-semibold">Son satışlar</h2>
+      <button id="btnGecmisTemizle" class="text-xs text-danger font-medium">Geçmişi sil</button>
+    </div>
+    <div id="satisListe" class="mt-2 space-y-2"></div>
+  </section>
+</main>
+
+<!-- ======================= TOPLAM + ÖDEME (sabit alt panel) ======================= -->
+<div id="odemePanel" class="fixed bottom-0 inset-x-0 z-30">
+  <div class="max-w-3xl mx-auto px-3 pb-3 safe-b">
+    <div class="bg-ink text-white rounded-2xl shadow-lg overflow-hidden">
+      <div class="px-4 pt-3 pb-2 flex items-end justify-between">
+        <div>
+          <div class="text-[11px] text-white/55">Toplam tutar</div>
+          <div id="toplamTutar" class="num text-[38px] leading-none font-bold tracking-tight">₺0,00</div>
+        </div>
+        <div id="sepetAdetBilgi" class="num text-xs text-white/55 pb-1">0 kalem</div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 p-2 pt-0">
+        <button id="btnNakit" class="bg-kasa hover:bg-kasa-dark rounded-xl py-4 font-bold text-[15px] leading-tight active:scale-[.99] transition">
+          Nakit öde<br><span class="font-normal text-white/75 text-[12px]">satışı tamamla</span>
+        </button>
+        <button id="btnKart" class="bg-amber2 text-ink rounded-xl py-4 font-bold text-[15px] leading-tight active:scale-[.99] transition">
+          Kredi kartı<br><span class="font-normal text-ink/65 text-[12px]">satışı tamamla</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= YENİ ÜRÜN MODALI ======================= -->
+<div id="modal" class="hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div class="pop bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 safe-b">
+    <h3 class="text-lg font-semibold">Ürün bulunamadı</h3>
+    <p class="text-sm text-ink-soft mt-1">Bu barkod veritabanında yok. Şimdi kaydedip sepete ekleyebilirsiniz.</p>
+    <div class="mt-3 mono text-sm bg-paper rounded-xl px-3 py-2 border border-black/5" id="mBarkodGoster">—</div>
+    <div class="space-y-2 mt-3">
+      <input id="mAd" placeholder="Ürün adı"
+             class="w-full rounded-xl border border-black/10 px-3 py-3 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+      <div class="flex gap-2">
+        <input id="mFiyat" type="number" step="0.01" min="0" placeholder="Fiyat ₺"
+               class="num w-1/2 rounded-xl border border-black/10 px-3 py-3 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        <input id="mStok" type="number" step="1" value="10"
+               class="num w-1/2 rounded-xl border border-black/10 px-3 py-3 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+      </div>
+      <p class="text-[11px] text-ink-soft">Sağdaki kutu başlangıç stok adedidir.</p>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button id="mIptal" class="px-4 py-3 rounded-xl bg-paper border border-black/10 text-ink-soft font-medium">Vazgeç</button>
+      <button id="mKaydet" class="flex-1 py-3 rounded-xl bg-kasa text-white font-semibold">Kaydet ve sepete ekle</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= SATIŞ TAMAM EKRANI ======================= -->
+<div id="basariEkran" class="hidden fixed inset-0 z-[60] bg-kasa/95 text-white flex items-center justify-center">
+  <div class="pop text-center px-6">
+    <div class="text-6xl">✓</div>
+    <div class="text-2xl font-bold mt-3">Satış tamamlandı</div>
+    <div id="basariDetay" class="num mt-1 text-white/85">—</div>
+  </div>
+</div>
+
+<!-- Bildirim -->
+<div id="toastKutu" class="fixed top-16 inset-x-0 z-[70] flex flex-col items-center gap-2 px-4 pointer-events-none"></div>
+
+<script>
+/* ============================================================
+   VERİ KATMANI
+   ============================================================ */
+const PKEY = 'kasa_urunler_v1';
+const SKEY = 'kasa_satislar_v1';
+
+const VARSAYILAN_URUNLER = [
+  { barkod: '8690000000011', ad: 'Su 0,5 L',            fiyat: 8.00,  stok: 120 },
+  { barkod: '8690000000028', ad: 'Ekmek',               fiyat: 15.00, stok: 40  },
+  { barkod: '8690000000035', ad: 'Süt 1 L',             fiyat: 34.50, stok: 25  },
+  { barkod: '8690000000042', ad: 'Çikolatalı gofret',   fiyat: 12.75, stok: 60  },
+  { barkod: '8690000000059', ad: 'Kola 330 ml',         fiyat: 28.00, stok: 36  }
+];
+
+let urunler = [];
+let sepet   = [];   // { barkod, ad, fiyat, adet }
+let satislar = [];
+
+function veriYukle() {
+  try {
+    const ham = localStorage.getItem(PKEY);
+    urunler = ham === null ? VARSAYILAN_URUNLER.map(u => ({ ...u })) : JSON.parse(ham);
+    if (!Array.isArray(urunler)) urunler = VARSAYILAN_URUNLER.map(u => ({ ...u }));
+    if (ham === null) urunleriKaydet();
+  } catch (e) { urunler = VARSAYILAN_URUNLER.map(u => ({ ...u })); }
+
+  try {
+    satislar = JSON.parse(localStorage.getItem(SKEY) || '[]');
+    if (!Array.isArray(satislar)) satislar = [];
+  } catch (e) { satislar = []; }
+}
+function urunleriKaydet()  { try { localStorage.setItem(PKEY, JSON.stringify(urunler)); } catch (e) { toast('Depolama alanına yazılamadı', 'err'); } }
+function satislariKaydet() { try { localStorage.setItem(SKEY, JSON.stringify(satislar.slice(-300))); } catch (e) {} }
+
+const urunBul = kod => urunler.find(u => String(u.barkod) === String(kod));
+
+/* ============================================================
+   YARDIMCILAR
+   ============================================================ */
+const TL = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' });
+const para = n => TL.format(Number(n) || 0);
+const $ = id => document.getElementById(id);
+const kacir = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(mesaj, tur = 'ok') {
+  const renk = tur === 'err' ? 'bg-danger' : tur === 'uyari' ? 'bg-amber2 text-ink' : 'bg-ink';
+  const el = document.createElement('div');
+  el.className = `pop ${renk} text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg max-w-[92%] text-center`;
+  el.textContent = mesaj;
+  $('toastKutu').appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 320); }, 1900);
+}
+
+let sesCtx = null;
+function bip(basarili = true) {
+  try {
+    sesCtx = sesCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (sesCtx.state === 'suspended') sesCtx.resume();
+    const o = sesCtx.createOscillator(), g = sesCtx.createGain();
+    o.type = 'square';
+    o.frequency.value = basarili ? 1180 : 320;
+    g.gain.setValueAtTime(0.001, sesCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.16, sesCtx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, sesCtx.currentTime + (basarili ? 0.12 : 0.3));
+    o.connect(g); g.connect(sesCtx.destination);
+    o.start(); o.stop(sesCtx.currentTime + (basarili ? 0.13 : 0.31));
+  } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate(basarili ? 35 : [40, 60, 40]);
+}
+
+/* ============================================================
+   SEKMELER
+   ============================================================ */
+let aktifSekme = 'kasa';
+function sekmeAc(ad) {
+  aktifSekme = ad;
+  ['kasa', 'urunler', 'satislar'].forEach(t => {
+    $('tab-' + t).classList.toggle('hidden', t !== ad);
+  });
+  document.querySelectorAll('.tabbtn').forEach(b => {
+    const aktif = b.dataset.tab === ad;
+    b.className = 'tabbtn flex-1 py-2.5 text-sm font-medium rounded-t-lg ' +
+      (aktif ? 'bg-paper text-kasa-dark' : 'text-white/75');
+  });
+  $('odemePanel').classList.toggle('hidden', ad !== 'kasa');
+  document.body.style.paddingBottom = ad === 'kasa' ? '' : '1rem';
+  if (ad === 'satislar') satislariCiz();
+  if (ad === 'urunler') urunleriCiz();
+  window.scrollTo({ top: 0, behavior: 'instant' in document.body.style ? 'instant' : 'auto' });
+}
+document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => sekmeAc(b.dataset.tab)));
+
+/* ============================================================
+   SEPET
+   ============================================================ */
+function sepeteEkle(urun, vurgula = true) {
+  const mevcut = sepet.find(s => s.barkod === urun.barkod);
+  if (mevcut) mevcut.adet += 1;
+  else sepet.push({ barkod: urun.barkod, ad: urun.ad, fiyat: Number(urun.fiyat), adet: 1 });
+
+  const toplamAdet = (mevcut ? mevcut.adet : 1);
+  if (Number(urun.stok) < toplamAdet) toast(`${urun.ad}: stokta ${Number(urun.stok) || 0} adet var`, 'uyari');
+
+  sepetiCiz(vurgula ? urun.barkod : null);
+}
+
+function sepetiCiz(vurgulaBarkod = null) {
+  const liste = $('sepetListe');
+  liste.innerHTML = sepet.map(s => {
+    const urun = urunBul(s.barkod);
+    const stok = urun ? Number(urun.stok) : 0;
+    const yetersiz = stok < s.adet;
+    return `
+    <div class="bg-white rounded-2xl border border-black/5 p-3 shadow-sm ${vurgulaBarkod === s.barkod ? 'hit' : ''}" data-satir="${kacir(s.barkod)}">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold leading-tight truncate">${kacir(s.ad)}</div>
+          <div class="mono text-[11px] text-ink-soft mt-0.5">${kacir(s.barkod)}</div>
+          <div class="num text-sm text-ink-soft mt-1">${para(s.fiyat)} / adet
+            ${yetersiz ? `<span class="text-danger font-medium">· stok ${stok}</span>` : ''}
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="num font-bold text-lg">${para(s.fiyat * s.adet)}</div>
+          <button data-act="sil" data-kod="${kacir(s.barkod)}" class="text-[11px] text-danger mt-1">Çıkar</button>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mt-2">
+        <button data-act="azalt" data-kod="${kacir(s.barkod)}" class="w-11 h-11 rounded-xl bg-paper border border-black/10 text-xl font-bold active:scale-95 transition">−</button>
+        <div class="num w-14 text-center text-lg font-bold">${s.adet}</div>
+        <button data-act="artir" data-kod="${kacir(s.barkod)}" class="w-11 h-11 rounded-xl bg-kasa-light border border-kasa/20 text-kasa-dark text-xl font-bold active:scale-95 transition">+</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('sepetBos').classList.toggle('hidden', sepet.length > 0);
+
+  const toplam = sepet.reduce((t, s) => t + s.fiyat * s.adet, 0);
+  const adet   = sepet.reduce((t, s) => t + s.adet, 0);
+  $('toplamTutar').textContent = para(toplam);
+  $('sepetAdetBilgi').textContent = `${sepet.length} kalem · ${adet} adet`;
+
+  const kapali = sepet.length === 0;
+  [$('btnNakit'), $('btnKart')].forEach(b => {
+    b.disabled = kapali;
+    b.classList.toggle('opacity-40', kapali);
+    b.classList.toggle('pointer-events-none', kapali);
+  });
+}
+
+$('sepetListe').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const kod = btn.dataset.kod;
+  const i = sepet.findIndex(s => s.barkod === kod);
+  if (i < 0) return;
+
+  if (btn.dataset.act === 'artir') sepet[i].adet += 1;
+  if (btn.dataset.act === 'azalt') { sepet[i].adet -= 1; if (sepet[i].adet <= 0) sepet.splice(i, 1); }
+  if (btn.dataset.act === 'sil')   sepet.splice(i, 1);
+  sepetiCiz();
+});
+
+$('btnSepetBosalt').addEventListener('click', () => {
+  if (!sepet.length) return;
+  sepet = []; sepetiCiz(); toast('Sepet boşaltıldı');
+});
+
+/* ============================================================
+   BARKOD İŞLEME
+   ============================================================ */
+function barkodIsle(kodHam) {
+  const kod = String(kodHam).trim();
+  if (!kod) return;
+  const urun = urunBul(kod);
+  if (urun) {
+    bip(true);
+    sepeteEkle(urun);
+    if (aktifSekme !== 'kasa') sekmeAc('kasa');
+  } else {
+    bip(false);
+    modalAc(kod);
+  }
+}
+
+$('btnElleEkle').addEventListener('click', () => {
+  const v = $('elleBarkod').value.trim();
+  if (!v) { toast('Önce barkod yazın', 'uyari'); return; }
+  barkodIsle(v);
+  $('elleBarkod').value = '';
+});
+$('elleBarkod').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnElleEkle').click(); });
+
+/* ============================================================
+   KAMERA / HTML5-QRCODE
+   ============================================================ */
+let tarayici = null, taramaAcik = false, kameraListesi = [], kameraIndex = 0;
+let sonKod = '', sonZaman = 0;
+
+function taramaKutusu(vw, vh) {
+  const kucuk = Math.min(vw, vh);
+  return { width: Math.floor(Math.min(vw * 0.85, kucuk * 1.6)), height: Math.floor(kucuk * 0.45) };
+}
+
+function taramaAyarlari() {
+  const cfg = {
+    fps: 12,
+    qrbox: taramaKutusu,
+    rememberLastUsedCamera: true,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+  };
+  if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+    cfg.formatsToSupport = [
+      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.CODABAR,
+      Html5QrcodeSupportedFormats.QR_CODE
+    ];
+  }
+  return cfg;
+}
+
+function okumaBasarili(metin) {
+  const simdi = Date.now();
+  if (metin === sonKod && simdi - sonZaman < 1200) return;  // aynı karenin tekrarını yut
+  sonKod = metin; sonZaman = simdi;
+  barkodIsle(metin);
+}
+
+async function kamerayiAc(hedefKamera) {
+  if (taramaAcik) return;
+  $('kameraNot').classList.add('hidden');
+
+  if (typeof Html5Qrcode === 'undefined') {
+    kameraNotu('Barkod kütüphanesi yüklenemedi. İnternet bağlantısını kontrol edip sayfayı yenileyin.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    kameraNotu('Tarayıcı kamerayı desteklemiyor. Sayfa HTTPS üzerinden açılmalı (veya localhost).');
+    return;
+  }
+
+  $('kameraKutu').classList.remove('hidden');
+  tarayici = tarayici || new Html5Qrcode('reader', { verbose: false });
+
+  try {
+    const kaynak = hedefKamera || { facingMode: { exact: 'environment' } };
+    await tarayici.start(kaynak, taramaAyarlari(), okumaBasarili, () => {});
+    taramaAcik = true;
+  } catch (e1) {
+    try {
+      await tarayici.start({ facingMode: 'environment' }, taramaAyarlari(), okumaBasarili, () => {});
+      taramaAcik = true;
+    } catch (e2) {
+      try {
+        kameraListesi = await Html5Qrcode.getCameras();
+        if (!kameraListesi.length) throw new Error('kamera yok');
+        await tarayici.start(kameraListesi[0].id, taramaAyarlari(), okumaBasarili, () => {});
+        kameraIndex = 0; taramaAcik = true;
+      } catch (e3) {
+        $('kameraKutu').classList.add('hidden');
+        const m = String(e3 && e3.message || e3);
+        kameraNotu(/Permission|NotAllowed/i.test(m)
+          ? 'Kamera izni verilmedi. Tarayıcı ayarlarından bu siteye kamera izni verip tekrar deneyin.'
+          : 'Kamera açılamadı. Barkodu alttaki kutuya elle yazarak devam edebilirsiniz.');
+        return;
+      }
+    }
+  }
+
+  kameraArayuzuGuncelle();
+  try { kameraListesi = await Html5Qrcode.getCameras(); } catch (e) {}
+  $('btnKamerayiDegistir').classList.toggle('hidden', !(kameraListesi.length > 1));
+  try { sesCtx = sesCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+}
+
+function kameraNotu(m) { const n = $('kameraNot'); n.textContent = m; n.classList.remove('hidden'); }
+
+async function kamerayiKapat() {
+  if (!tarayici || !taramaAcik) return;
+  try { await tarayici.stop(); tarayici.clear(); } catch (e) {}
+  taramaAcik = false;
+  $('kameraKutu').classList.add('hidden');
+  $('btnKamerayiDegistir').classList.add('hidden');
+  kameraArayuzuGuncelle();
+}
+
+function kameraArayuzuGuncelle() {
+  const b = $('btnKamera');
+  b.textContent = taramaAcik ? 'Kamerayı kapat' : 'Kamerayı aç';
+  b.className = taramaAcik
+    ? 'flex-1 bg-paper text-ink border border-black/10 rounded-xl py-3 font-semibold active:scale-[.99] transition'
+    : 'flex-1 bg-ink text-white rounded-xl py-3 font-semibold active:scale-[.99] transition';
+}
+
+$('btnKamera').addEventListener('click', () => taramaAcik ? kamerayiKapat() : kamerayiAc());
+
+$('btnKamerayiDegistir').addEventListener('click', async () => {
+  if (kameraListesi.length < 2) return;
+  kameraIndex = (kameraIndex + 1) % kameraListesi.length;
+  await kamerayiKapat();
+  kamerayiAc(kameraListesi[kameraIndex].id);
+});
+
+function taramayiDurdur() { try { if (taramaAcik) tarayici.pause(true); } catch (e) {} }
+function taramayiSurdur() { try { if (taramaAcik) tarayici.resume(); } catch (e) {} }
+
+/* ============================================================
+   YENİ ÜRÜN MODALI
+   ============================================================ */
+let modalBarkod = '';
+function modalAc(barkod) {
+  modalBarkod = barkod;
+  $('mBarkodGoster').textContent = barkod;
+  $('mAd').value = ''; $('mFiyat').value = ''; $('mStok').value = '10';
+  $('modal').classList.remove('hidden');
+  taramayiDurdur();
+  setTimeout(() => $('mAd').focus(), 150);
+}
+function modalKapat() {
+  $('modal').classList.add('hidden');
+  sonKod = ''; sonZaman = 0;
+  taramayiSurdur();
+}
+$('mIptal').addEventListener('click', modalKapat);
+$('modal').addEventListener('click', e => { if (e.target === $('modal')) modalKapat(); });
+
+$('mKaydet').addEventListener('click', () => {
+  const ad = $('mAd').value.trim();
+  const fiyat = parseFloat(String($('mFiyat').value).replace(',', '.'));
+  const stok = parseInt($('mStok').value, 10);
+  if (!ad) { toast('Ürün adı gerekli', 'uyari'); $('mAd').focus(); return; }
+  if (!isFinite(fiyat) || fiyat < 0) { toast('Geçerli bir fiyat girin', 'uyari'); $('mFiyat').focus(); return; }
+
+  const yeni = { barkod: modalBarkod, ad, fiyat, stok: isFinite(stok) ? stok : 0 };
+  urunler.push(yeni);
+  urunleriKaydet();
+  sepeteEkle(yeni);
+  sayaclariGuncelle();
+  modalKapat();
+  toast(`${ad} kaydedildi ve sepete eklendi`);
+});
+
+/* ============================================================
+   ÖDEME / STOK DÜŞÜMÜ
+   ============================================================ */
+async function satisiTamamla(yontem) {
+  if (!sepet.length) { toast('Sepet boş', 'uyari'); return; }
+
+  const toplam = sepet.reduce((t, s) => t + s.fiyat * s.adet, 0);
+  const eksikler = [];
+
+  sepet.forEach(s => {
+    const u = urunBul(s.barkod);
+    if (!u) return;
+    const kalan = Number(u.stok) - s.adet;
+    if (kalan < 0) eksikler.push(u.ad);
+    u.stok = Math.max(0, kalan);
+  });
+  urunleriKaydet();
+
+  satislar.push({
+    id: Date.now(),
+    tarih: new Date().toISOString(),
+    yontem,                       // 'nakit' | 'kart'
+    toplam,
+    kalemler: sepet.map(s => ({ ...s }))
+  });
+  satislariKaydet();
+
+  const yontemAdi = yontem === 'nakit' ? 'Nakit' : 'Kredi kartı';
+  $('basariDetay').textContent = `${yontemAdi} · ${para(toplam)}`;
+  $('basariEkran').classList.remove('hidden');
+  bip(true);
+
+  sepet = [];
+  sepetiCiz();
+  sayaclariGuncelle();
+  if (aktifSekme === 'urunler') urunleriCiz();
+
+  setTimeout(() => {
+    $('basariEkran').classList.add('hidden');
+    toast(`Satış tamamlandı — ${yontemAdi} ödemesi alındı`);
+    if (eksikler.length) toast(`Stok sıfırlandı: ${eksikler.join(', ')}`, 'uyari');
+    // Yeni satış için kamerayı hazırla
+    sonKod = ''; sonZaman = 0;
+    if (taramaAcik) taramayiSurdur(); else kamerayiAc();
+  }, 1500);
+}
+$('btnNakit').addEventListener('click', () => satisiTamamla('nakit'));
+$('btnKart').addEventListener('click', () => satisiTamamla('kart'));
+
+/* ============================================================
+   ÜRÜN YÖNETİMİ
+   ============================================================ */
+let duzenlenen = null;
+
+function urunleriCiz() {
+  const q = $('aramaKutusu').value.trim().toLocaleLowerCase('tr');
+  const liste = urunler
+    .filter(u => !q || u.ad.toLocaleLowerCase('tr').includes(q) || String(u.barkod).includes(q))
+    .slice().sort((a, b) => a.ad.localeCompare(b.ad, 'tr'));
+
+  $('urunListe').innerHTML = liste.length ? liste.map(u => `
+    <div class="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+      <div class="flex items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold truncate">${kacir(u.ad)}</div>
+          <div class="mono text-[11px] text-ink-soft">${kacir(u.barkod)}</div>
+        </div>
+        <div class="num text-right ${Number(u.stok) <= 5 ? 'text-danger' : 'text-ink-soft'} text-sm">
+          stok<br><span class="text-xl font-bold">${Number(u.stok) || 0}</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mt-3">
+        <label class="flex-1">
+          <span class="block text-[10px] text-ink-soft mb-1">Fiyat ₺</span>
+          <input type="number" step="0.01" min="0" value="${Number(u.fiyat)}" data-alan="fiyat" data-kod="${kacir(u.barkod)}"
+                 class="num w-full rounded-lg border border-black/10 px-2 py-2 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        </label>
+        <label class="flex-1">
+          <span class="block text-[10px] text-ink-soft mb-1">Stok</span>
+          <input type="number" step="1" value="${Number(u.stok) || 0}" data-alan="stok" data-kod="${kacir(u.barkod)}"
+                 class="num w-full rounded-lg border border-black/10 px-2 py-2 bg-paper focus:outline-none focus:ring-2 focus:ring-kasa/40" />
+        </label>
+        <button data-act="guncelle" data-kod="${kacir(u.barkod)}" class="self-end px-3 py-2 rounded-lg bg-kasa text-white text-sm font-semibold">Güncelle</button>
+        <button data-act="sil" data-kod="${kacir(u.barkod)}" class="self-end px-3 py-2 rounded-lg bg-paper border border-black/10 text-danger text-sm">Sil</button>
+      </div>
+    </div>`).join('')
+    : `<div class="bg-white rounded-2xl border border-dashed border-black/10 p-8 text-center text-sm text-ink-soft">Eşleşen ürün yok. Yukarıdaki formdan ekleyebilirsiniz.</div>`;
+}
+
+$('aramaKutusu').addEventListener('input', urunleriCiz);
+
+$('urunListe').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const kod = btn.dataset.kod;
+  const u = urunBul(kod);
+  if (!u) return;
+
+  if (btn.dataset.act === 'guncelle') {
+    const kart = btn.closest('div.bg-white');
+    const fiyatEl = kart.querySelector('input[data-alan="fiyat"]');
+    const stokEl  = kart.querySelector('input[data-alan="stok"]');
+    const f = parseFloat(String(fiyatEl.value).replace(',', '.'));
+    const s = parseInt(stokEl.value, 10);
+    if (!isFinite(f) || f < 0) { toast('Geçerli bir fiyat girin', 'uyari'); return; }
+    u.fiyat = f;
+    u.stok = isFinite(s) ? s : 0;
+    urunleriKaydet();
+    // sepette varsa fiyatı da güncelle
+    const sp = sepet.find(x => x.barkod === u.barkod);
+    if (sp) { sp.fiyat = u.fiyat; sepetiCiz(); }
+    toast(`${u.ad} güncellendi`);
+    urunleriCiz();
+  }
+
+  if (btn.dataset.act === 'sil') {
+    if (!confirm(`"${u.ad}" ürünü silinsin mi?`)) return;
+    urunler = urunler.filter(x => x.barkod !== u.barkod);
+    sepet = sepet.filter(x => x.barkod !== u.barkod);
+    urunleriKaydet(); sepetiCiz(); urunleriCiz(); sayaclariGuncelle();
+    toast('Ürün silindi');
+  }
+});
+
+$('btnUrunKaydet').addEventListener('click', () => {
+  const barkod = $('fBarkod').value.trim();
+  const ad = $('fAd').value.trim();
+  const fiyat = parseFloat(String($('fFiyat').value).replace(',', '.'));
+  const stok = parseInt($('fStok').value, 10);
+
+  if (!barkod) { toast('Barkod gerekli', 'uyari'); $('fBarkod').focus(); return; }
+  if (!ad) { toast('Ürün adı gerekli', 'uyari'); $('fAd').focus(); return; }
+  if (!isFinite(fiyat) || fiyat < 0) { toast('Geçerli bir fiyat girin', 'uyari'); $('fFiyat').focus(); return; }
+
+  const mevcut = urunBul(barkod);
+  if (mevcut) {
+    mevcut.ad = ad; mevcut.fiyat = fiyat; mevcut.stok = isFinite(stok) ? stok : mevcut.stok;
+    toast('Mevcut barkod güncellendi');
+  } else {
+    urunler.push({ barkod, ad, fiyat, stok: isFinite(stok) ? stok : 0 });
+    toast('Ürün eklendi');
+  }
+  urunleriKaydet(); formTemizle(); urunleriCiz(); sayaclariGuncelle();
+});
+
+function formTemizle() {
+  ['fBarkod', 'fAd', 'fFiyat', 'fStok'].forEach(id => $(id).value = '');
+  duzenlenen = null;
+  $('formBaslik').textContent = 'Yeni ürün ekle';
+}
+$('btnFormTemizle').addEventListener('click', formTemizle);
+
+/* ============================================================
+   SATIŞ GEÇMİŞİ
+   ============================================================ */
+function bugunMu(iso) {
+  const d = new Date(iso), n = new Date();
+  return d.getDate() === n.getDate() && d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
+}
+
+function satislariCiz() {
+  const bugun = satislar.filter(s => bugunMu(s.tarih));
+  const ciro = bugun.reduce((t, s) => t + s.toplam, 0);
+  const nakit = bugun.filter(s => s.yontem === 'nakit').reduce((t, s) => t + s.toplam, 0);
+  $('bugunCiro').textContent = para(ciro);
+  $('bugunDagilim').textContent = `Nakit ${para(nakit)} · Kart ${para(ciro - nakit)}`;
+
+  const son = satislar.slice(-25).reverse();
+  $('satisListe').innerHTML = son.length ? son.map(s => {
+    const d = new Date(s.tarih);
+    const saat = d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const rozet = s.yontem === 'nakit'
+      ? '<span class="text-[11px] px-2 py-0.5 rounded-full bg-kasa-light text-kasa-dark">Nakit</span>'
+      : '<span class="text-[11px] px-2 py-0.5 rounded-full bg-amber2/20 text-amber2">Kart</span>';
+    return `
+    <div class="bg-white rounded-2xl border border-black/5 p-3 shadow-sm">
+      <div class="flex items-center gap-2">
+        <div class="num text-xs text-ink-soft">${saat}</div>
+        ${rozet}
+        <div class="num ml-auto font-bold">${para(s.toplam)}</div>
+      </div>
+      <div class="text-xs text-ink-soft mt-1 truncate">${kacir(s.kalemler.map(k => `${k.ad} ×${k.adet}`).join(', '))}</div>
+    </div>`;
+  }).join('') : `<div class="bg-white rounded-2xl border border-dashed border-black/10 p-8 text-center text-sm text-ink-soft">Henüz satış yok.</div>`;
+}
+
+$('btnGecmisTemizle').addEventListener('click', () => {
+  if (!satislar.length) return;
+  if (!confirm('Tüm satış geçmişi silinsin mi? Stoklar etkilenmez.')) return;
+  satislar = []; satislariKaydet(); satislariCiz(); sayaclariGuncelle();
+  toast('Satış geçmişi silindi');
+});
+
+/* ============================================================
+   SAYAÇLAR & BAŞLANGIÇ
+   ============================================================ */
+function sayaclariGuncelle() {
+  $('urunSayaci').textContent = `${urunler.length} ürün`;
+  const bugun = satislar.filter(s => bugunMu(s.tarih));
+  const ciro = bugun.reduce((t, s) => t + s.toplam, 0);
+  $('gunlukOzet').textContent = `Bugün: ${bugun.length} satış · ${para(ciro)}`;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && taramaAcik) kamerayiKapat();
+});
+
+veriYukle();
+sepetiCiz();
+urunleriCiz();
+sayaclariGuncelle();
+sekmeAc('kasa');
+</script>
+</body>
+</html>
